@@ -1,6 +1,5 @@
 package com.inventory.repository;
 
-
 import java.util.List;
 import java.util.Optional;
 
@@ -19,4 +18,15 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     List<Product> findByNameContainingIgnoreCase(String name);
 
     List<Product> findByQuantityLessThanEqual(Integer quantity);
+
+    List<Product> findByCreatedBy(String createdBy);
+
+    List<Product> findByCreatedByAndActiveTrue(String createdBy);
+
+    List<Product> findByActiveTrue();
+
+    Optional<Product> findByIdAndCreatedBy(
+            Long id,
+            String createdBy
+    );
 }

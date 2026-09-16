@@ -10,111 +10,351 @@ import com.inventory.entity.Product;
 import com.inventory.repository.CategoryRepository;
 import com.inventory.repository.ProductRepository;
 
-import com.inventory.exception.DuplicateResourceException;
-import com.inventory.exception.ResourceNotFoundException;
-
 @Service
 public class ProductService {
+
+    private static final String ADMIN_EMAIL = "test@gmail.com";
+    private static final String SYSTEM_USER = "SYSTEM";
 
     private final ProductRepository productRepository;
     private final CategoryRepository categoryRepository;
 
-    public ProductService(ProductRepository productRepository,
-                          CategoryRepository categoryRepository) {
+    public ProductService(
+            ProductRepository productRepository,
+            CategoryRepository categoryRepository) {
+
         this.productRepository = productRepository;
         this.categoryRepository = categoryRepository;
     }
 
-    public Product createProduct(ProductRequest request) {
+    /* =========================================================
+       CREATE PRODUCT
+       ========================================================= */
 
-        if (productRepository.existsBySku(request.getSku())) {
-            throw new DuplicateResourceException("SKU already exists");
+    public Product createProduct(
+            ProductRequest request,
+            String loggedInEmail) {
+
+        String sku = request.getSku().trim();
+
+        if (productRepository.existsBySku(sku)) {
+            throw new RuntimeException("SKU already exists.");
         }
 
-        Category category = categoryRepository.findById(request.getCategoryId())
-                .orElseThrow(() -> new ResourceNotFoundException("Category not found"));
+        Category category = getAllowedCategory(
+                request.getCategoryId(),
+                loggedInEmail
+        );
 
         Product product = new Product();
 
-        product.setName(request.getName());
-        product.setSku(request.getSku());
-        product.setDescription(request.getDescription());
+        product.setName(request.getName().trim());
+        product.setSku(sku);
+
+        product.setDescription(
+                request.getDescription() == null
+                        ? null
+                        : request.getDescription().trim()
+        );
+
         product.setPrice(request.getPrice());
         product.setQuantity(request.getQuantity());
-        product.setLowStockThreshold(request.getLowStockThreshold());
+
+        product.setLowStockThreshold(
+                request.getLowStockThreshold() == null
+                        ? 10
+                        : request.getLowStockThreshold()
+        );
+
         product.setCategory(category);
         product.setActive(true);
-        product.setCreatedBy("SYSTEM");
-        product.setUpdatedBy("SYSTEM");
+
+        product.setCreatedBy(loggedInEmail);
+        product.setUpdatedBy(loggedInEmail);
 
         return productRepository.save(product);
     }
+
+    /* =========================================================
+       GET ALL PRODUCTS
+       ADMIN
+       ========================================================= */
 
     public List<Product> getAllProducts() {
-        return productRepository.findAll();
+        return productRepository.findByActiveTrue();
     }
+
+    /* =========================================================
+       GET MY PRODUCTS
+       ========================================================= */
+
+    public List<Product> getMyProducts(
+            String loggedInEmail) {
+
+        return productRepository
+                .findByCreatedByAndActiveTrue(
+                        loggedInEmail
+                );
+    }
+
+    /* =========================================================
+       GET PRODUCT BY ID
+       ========================================================= */
 
     public Product getProductById(Long id) {
+
         return productRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Product not found"));
+                .orElseThrow(
+                        () -> new RuntimeException(
+                                "Product not found."
+                        )
+                );
     }
 
-    public Product updateProduct(Long id, ProductRequest request) {
+    /* =========================================================
+       UPDATE PRODUCT - ADMIN
+       
+       ADMIN CAN EDIT ANY PRODUCT
+       ========================================================= */
 
-        Product product = getProductById(id);
+    public Product updateProductAsAdmin(
+            Long id,
+            ProductRequest request,
+            String loggedInEmail) {
 
-        Category category = categoryRepository.findById(request.getCategoryId())
-                .orElseThrow(() -> new ResourceNotFoundException("Category not found"));
+        Product product = productRepository.findById(id)
+                .orElseThrow(
+                        () -> new RuntimeException(
+                                "Product not found."
+                        )
+                );
 
-        product.setName(request.getName());
-        product.setSku(request.getSku());
-        product.setDescription(request.getDescription());
-        product.setPrice(request.getPrice());
-        product.setQuantity(request.getQuantity());
-        product.setLowStockThreshold(request.getLowStockThreshold());
-        product.setCategory(category);
-        product.setUpdatedBy("SYSTEM");
+        String newSku = request.getSku().trim();
 
-        return productRepository.save(product);
-    }
+        /*
+         * Make sure another product does not
+         * already use this SKU.
+         */
 
-    public void deleteProduct(Long id) {
+        Product existingProduct =
+                productRepository.findBySku(newSku)
+                        .orElse(null);
 
-        Product product = getProductById(id);
+        if (existingProduct != null
+                && !existingProduct.getId().equals(id)) {
 
-        product.setActive(false);
-        product.setUpdatedBy("SYSTEM");
-
-        productRepository.save(product);
-    }
-
-    public List<Product> getProductsByCategory(Long categoryId) {
-        return productRepository.findByCategoryId(categoryId);
-    }
-
-    public List<Product> searchProductsByName(String name) {
-        return productRepository.findByNameContainingIgnoreCase(name);
-    }
-
-    public List<Product> getLowStockProducts(Integer quantity) {
-        return productRepository.findByQuantityLessThanEqual(quantity);
-    }
-
-    public Product updateStockQuantity(Long productId, Integer quantity) {
-
-        Product product = getProductById(productId);
-
-        if (quantity < 0) {
-            throw new IllegalArgumentException("Quantity cannot be negative");
+            throw new RuntimeException(
+                    "SKU already exists."
+            );
         }
 
-        product.setQuantity(quantity);
-        product.setUpdatedBy("SYSTEM");
+        /*
+         * Admin can use any active category.
+         */
+
+        Category category =
+                categoryRepository.findById(
+                        request.getCategoryId()
+                ).orElseThrow(
+                        () -> new RuntimeException(
+                                "Category not found."
+                        )
+                );
+
+        if (!Boolean.TRUE.equals(
+                category.getActive())) {
+
+            throw new RuntimeException(
+                    "Selected category is inactive."
+            );
+        }
+
+        /*
+         * Update all editable fields.
+         */
+
+        product.setName(
+                request.getName().trim()
+        );
+
+        product.setSku(newSku);
+
+        product.setDescription(
+                request.getDescription() == null
+                        ? null
+                        : request.getDescription().trim()
+        );
+
+        product.setPrice(request.getPrice());
+
+        product.setQuantity(request.getQuantity());
+
+        product.setLowStockThreshold(
+                request.getLowStockThreshold() == null
+                        ? 10
+                        : request.getLowStockThreshold()
+        );
+
+        product.setCategory(category);
+
+        product.setUpdatedBy(loggedInEmail);
 
         return productRepository.save(product);
     }
-    public Product getProductBySku(String sku) {
-        return productRepository.findBySku(sku)
-                .orElseThrow(() -> new RuntimeException("Product not found"));
+
+    /* =========================================================
+       UPDATE OWN PRODUCT - USER
+       ========================================================= */
+
+    public Product updateOwnProduct(
+            Long id,
+            ProductRequest request,
+            String loggedInEmail) {
+
+        Product product =
+                productRepository
+                        .findByIdAndCreatedBy(
+                                id,
+                                loggedInEmail
+                        )
+                        .orElseThrow(
+                                () -> new RuntimeException(
+                                        "You can only edit your own products."
+                                )
+                        );
+
+        String newSku = request.getSku().trim();
+
+        Product existingProduct =
+                productRepository.findBySku(newSku)
+                        .orElse(null);
+
+        if (existingProduct != null
+                && !existingProduct.getId().equals(id)) {
+
+            throw new RuntimeException(
+                    "SKU already exists."
+            );
+        }
+
+        Category category = getAllowedCategory(
+                request.getCategoryId(),
+                loggedInEmail
+        );
+
+        product.setName(
+                request.getName().trim()
+        );
+
+        product.setSku(newSku);
+
+        product.setDescription(
+                request.getDescription() == null
+                        ? null
+                        : request.getDescription().trim()
+        );
+
+        product.setPrice(request.getPrice());
+
+        product.setQuantity(request.getQuantity());
+
+        product.setLowStockThreshold(
+                request.getLowStockThreshold() == null
+                        ? 10
+                        : request.getLowStockThreshold()
+        );
+
+        product.setCategory(category);
+
+        product.setUpdatedBy(loggedInEmail);
+
+        return productRepository.save(product);
+    }
+
+    /* =========================================================
+       DELETE PRODUCT - ADMIN
+       ========================================================= */
+
+    public void deleteProductAsAdmin(Long id) {
+
+        Product product =
+                productRepository.findById(id)
+                        .orElseThrow(
+                                () -> new RuntimeException(
+                                        "Product not found."
+                                )
+                        );
+
+        productRepository.delete(product);
+    }
+
+    /* =========================================================
+       DELETE OWN PRODUCT - USER
+       ========================================================= */
+
+    public void deleteOwnProduct(
+            Long id,
+            String loggedInEmail) {
+
+        Product product =
+                productRepository
+                        .findByIdAndCreatedBy(
+                                id,
+                                loggedInEmail
+                        )
+                        .orElseThrow(
+                                () -> new RuntimeException(
+                                        "You can only delete your own products."
+                                )
+                        );
+
+        productRepository.delete(product);
+    }
+
+    /* =========================================================
+       CHECK CATEGORY PERMISSION
+       ========================================================= */
+
+    private Category getAllowedCategory(
+            Long categoryId,
+            String loggedInEmail) {
+
+        Category category =
+                categoryRepository.findById(categoryId)
+                        .orElseThrow(
+                                () -> new RuntimeException(
+                                        "Category not found."
+                                )
+                        );
+
+        if (!Boolean.TRUE.equals(
+                category.getActive())) {
+
+            throw new RuntimeException(
+                    "Selected category is inactive."
+            );
+        }
+
+        String categoryOwner =
+                category.getCreatedBy();
+
+        boolean allowed =
+                SYSTEM_USER.equalsIgnoreCase(
+                        categoryOwner
+                )
+                || ADMIN_EMAIL.equalsIgnoreCase(
+                        categoryOwner
+                )
+                || loggedInEmail.equalsIgnoreCase(
+                        categoryOwner
+                );
+
+        if (!allowed) {
+            throw new RuntimeException(
+                    "You are not allowed to use this category."
+            );
+        }
+
+        return category;
     }
 }

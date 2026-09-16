@@ -1,71 +1,223 @@
 package com.inventory.controller;
 
-import java.util.List;
+import java.util.Map;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+
+import jakarta.validation.Valid;
 
 import com.inventory.dto.CategoryRequest;
 import com.inventory.entity.Category;
 import com.inventory.service.CategoryService;
 
-import jakarta.validation.Valid;
-
 @RestController
 @RequestMapping("/api/categories")
+@CrossOrigin(origins = "http://localhost:5173")
 public class CategoryController {
+
+    private static final String ADMIN_EMAIL = "test@gmail.com";
 
     private final CategoryService categoryService;
 
-    public CategoryController(CategoryService categoryService) {
+    public CategoryController(
+            CategoryService categoryService) {
+
         this.categoryService = categoryService;
     }
 
-    @PostMapping
-    public ResponseEntity<Category> createCategory(
-            @Valid @RequestBody CategoryRequest request) {
-
-        Category category = categoryService.createCategory(request);
-
-        return ResponseEntity
-                .status(HttpStatus.CREATED)
-                .body(category);
-    }
+    /* =========================================================
+       GET ALL CATEGORIES
+       ADMIN ONLY
+       ========================================================= */
 
     @GetMapping
-    public ResponseEntity<List<Category>> getAllCategories() {
+    public ResponseEntity<?> getAllCategories(
+            Authentication authentication) {
+
+        String email = authentication.getName();
+
+        if (!ADMIN_EMAIL.equalsIgnoreCase(email)) {
+
+            return ResponseEntity.status(403)
+                    .body(
+                            Map.of(
+                                    "message",
+                                    "Only admin can view all categories."
+                            )
+                    );
+        }
 
         return ResponseEntity.ok(
                 categoryService.getAllCategories()
         );
     }
 
-    @GetMapping("/{id}")
-    public ResponseEntity<Category> getCategoryById(
-            @PathVariable Long id) {
+    /* =========================================================
+       GET MY CATEGORIES
+       ========================================================= */
+
+    @GetMapping("/my")
+    public ResponseEntity<?> getMyCategories(
+            Authentication authentication) {
+
+        String email = authentication.getName();
 
         return ResponseEntity.ok(
-                categoryService.getCategoryById(id)
+                categoryService.getMyCategories(email)
         );
     }
+
+    /* =========================================================
+       GET AVAILABLE CATEGORIES
+       
+       Used by Product dropdown.
+       ========================================================= */
+
+    @GetMapping("/available")
+    public ResponseEntity<?> getAvailableCategories(
+            Authentication authentication) {
+
+        String email = authentication.getName();
+
+        return ResponseEntity.ok(
+                categoryService.getAvailableCategories(email)
+        );
+    }
+
+    /* =========================================================
+       CREATE CATEGORY
+       ADMIN + USER
+       ========================================================= */
+
+    @PostMapping
+    public ResponseEntity<?> createCategory(
+            @Valid @RequestBody CategoryRequest request,
+            Authentication authentication) {
+
+        String email = authentication.getName();
+
+        try {
+
+            Category category =
+                    categoryService.createCategory(
+                            request,
+                            email
+                    );
+
+            return ResponseEntity.ok(category);
+
+        } catch (RuntimeException ex) {
+
+            return ResponseEntity.badRequest()
+                    .body(
+                            Map.of(
+                                    "message",
+                                    ex.getMessage()
+                            )
+                    );
+        }
+    }
+
+    /* =========================================================
+       UPDATE CATEGORY
+       
+       ADMIN -> ANY CATEGORY
+       USER  -> OWN CATEGORY
+       ========================================================= */
 
     @PutMapping("/{id}")
-    public ResponseEntity<Category> updateCategory(
+    public ResponseEntity<?> updateCategory(
             @PathVariable Long id,
-            @Valid @RequestBody CategoryRequest request) {
+            @Valid @RequestBody CategoryRequest request,
+            Authentication authentication) {
 
-        return ResponseEntity.ok(
-                categoryService.updateCategory(id, request)
-        );
+        String email = authentication.getName();
+
+        try {
+
+            Category updatedCategory;
+
+            if (ADMIN_EMAIL.equalsIgnoreCase(email)) {
+
+                updatedCategory =
+                        categoryService.updateCategoryAsAdmin(
+                                id,
+                                request,
+                                email
+                        );
+
+            } else {
+
+                updatedCategory =
+                        categoryService.updateOwnCategory(
+                                id,
+                                request,
+                                email
+                        );
+            }
+
+            return ResponseEntity.ok(
+                    updatedCategory
+            );
+
+        } catch (RuntimeException ex) {
+
+            return ResponseEntity.badRequest()
+                    .body(
+                            Map.of(
+                                    "message",
+                                    ex.getMessage()
+                            )
+                    );
+        }
     }
 
+    /* =========================================================
+       DELETE CATEGORY
+       ========================================================= */
+
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteCategory(
-            @PathVariable Long id) {
+    public ResponseEntity<?> deleteCategory(
+            @PathVariable Long id,
+            Authentication authentication) {
 
-        categoryService.deleteCategory(id);
+        String email = authentication.getName();
 
-        return ResponseEntity.noContent().build();
+        try {
+
+            if (ADMIN_EMAIL.equalsIgnoreCase(email)) {
+
+                categoryService.deleteCategoryAsAdmin(
+                        id,
+                        email
+                );
+
+            } else {
+
+                categoryService.deleteOwnCategory(
+                        id,
+                        email
+                );
+            }
+
+            return ResponseEntity.ok(
+                    Map.of(
+                            "message",
+                            "Category deleted successfully."
+                    )
+            );
+
+        } catch (RuntimeException ex) {
+
+            return ResponseEntity.badRequest()
+                    .body(
+                            Map.of(
+                                    "message",
+                                    ex.getMessage()
+                            )
+                    );
+        }
     }
 }

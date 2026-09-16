@@ -1,98 +1,232 @@
 package com.inventory.controller;
 
-import java.util.List;
+import java.util.Map;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+
+import jakarta.validation.Valid;
 
 import com.inventory.dto.ProductRequest;
 import com.inventory.entity.Product;
 import com.inventory.service.ProductService;
 
-import jakarta.validation.Valid;
-
 @RestController
 @RequestMapping("/api/products")
+@CrossOrigin(origins = "http://localhost:5173")
 public class ProductController {
+
+    private static final String ADMIN_EMAIL = "test@gmail.com";
 
     private final ProductService productService;
 
-    public ProductController(ProductService productService) {
+    public ProductController(
+            ProductService productService) {
+
         this.productService = productService;
     }
 
-    @PostMapping
-    public ResponseEntity<Product> createProduct(
-            @Valid @RequestBody ProductRequest request) {
-
-        Product product = productService.createProduct(request);
-
-        return ResponseEntity
-                .status(HttpStatus.CREATED)
-                .body(product);
-    }
+    /* =========================================================
+       GET ALL PRODUCTS
+       ADMIN ONLY
+       ========================================================= */
 
     @GetMapping
-    public ResponseEntity<List<Product>> getAllProducts() {
+    public ResponseEntity<?> getAllProducts(
+            Authentication authentication) {
+
+        String email = authentication.getName();
+
+        if (!ADMIN_EMAIL.equalsIgnoreCase(email)) {
+
+            return ResponseEntity.status(403)
+                    .body(
+                            Map.of(
+                                    "message",
+                                    "Only admin can view all products."
+                            )
+                    );
+        }
 
         return ResponseEntity.ok(
                 productService.getAllProducts()
         );
     }
-    @GetMapping("/category/{categoryId}")
-    public ResponseEntity<List<Product>> getProductsByCategory(@PathVariable Long categoryId) {
-        return ResponseEntity.ok(productService.getProductsByCategory(categoryId));
-    }
-    
-    @GetMapping("/search")
-    public ResponseEntity<List<Product>> searchProducts(@RequestParam String name) {
-        return ResponseEntity.ok(productService.searchProductsByName(name));
+
+    /* =========================================================
+       GET MY PRODUCTS
+       ========================================================= */
+
+    @GetMapping("/my")
+    public ResponseEntity<?> getMyProducts(
+            Authentication authentication) {
+
+        String email = authentication.getName();
+
+        return ResponseEntity.ok(
+                productService.getMyProducts(email)
+        );
     }
 
-    @GetMapping("/low-stock")
-    public ResponseEntity<List<Product>> getLowStockProducts(@RequestParam Integer quantity) {
-        return ResponseEntity.ok(productService.getLowStockProducts(quantity));
-    }
+    /* =========================================================
+       GET PRODUCT BY ID
+       ========================================================= */
 
     @GetMapping("/{id}")
-    public ResponseEntity<Product> getProductById(
+    public ResponseEntity<?> getProductById(
             @PathVariable Long id) {
 
-        return ResponseEntity.ok(
-                productService.getProductById(id)
-        );
+        try {
+
+            return ResponseEntity.ok(
+                    productService.getProductById(id)
+            );
+
+        } catch (RuntimeException ex) {
+
+            return ResponseEntity.status(404)
+                    .body(
+                            Map.of(
+                                    "message",
+                                    ex.getMessage()
+                            )
+                    );
+        }
     }
+
+    /* =========================================================
+       CREATE PRODUCT
+       ADMIN + USER
+       ========================================================= */
+
+    @PostMapping
+    public ResponseEntity<?> createProduct(
+            @Valid @RequestBody ProductRequest request,
+            Authentication authentication) {
+
+        String email = authentication.getName();
+
+        try {
+
+            Product product =
+                    productService.createProduct(
+                            request,
+                            email
+                    );
+
+            return ResponseEntity.ok(product);
+
+        } catch (RuntimeException ex) {
+
+            return ResponseEntity.badRequest()
+                    .body(
+                            Map.of(
+                                    "message",
+                                    ex.getMessage()
+                            )
+                    );
+        }
+    }
+
+    /* =========================================================
+       UPDATE PRODUCT
+       
+       ADMIN -> ANY PRODUCT
+       USER  -> OWN PRODUCT
+       ========================================================= */
 
     @PutMapping("/{id}")
-    public ResponseEntity<Product> updateProduct(
+    public ResponseEntity<?> updateProduct(
             @PathVariable Long id,
-            @Valid @RequestBody ProductRequest request) {
+            @Valid @RequestBody ProductRequest request,
+            Authentication authentication) {
 
-        return ResponseEntity.ok(
-                productService.updateProduct(id, request)
-        );
+        String email = authentication.getName();
+
+        try {
+
+            Product updatedProduct;
+
+            if (ADMIN_EMAIL.equalsIgnoreCase(email)) {
+
+                updatedProduct =
+                        productService.updateProductAsAdmin(
+                                id,
+                                request,
+                                email
+                        );
+
+            } else {
+
+                updatedProduct =
+                        productService.updateOwnProduct(
+                                id,
+                                request,
+                                email
+                        );
+            }
+
+            return ResponseEntity.ok(
+                    updatedProduct
+            );
+
+        } catch (RuntimeException ex) {
+
+            return ResponseEntity.badRequest()
+                    .body(
+                            Map.of(
+                                    "message",
+                                    ex.getMessage()
+                            )
+                    );
+        }
     }
+
+    /* =========================================================
+       DELETE PRODUCT
+       
+       ADMIN -> ANY PRODUCT
+       USER  -> OWN PRODUCT
+       ========================================================= */
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteProduct(
-            @PathVariable Long id) {
-
-        productService.deleteProduct(id);
-
-        return ResponseEntity.noContent().build();
-    }
-    @PutMapping("/{id}/stock")
-    public ResponseEntity<Product> updateStockQuantity(
+    public ResponseEntity<?> deleteProduct(
             @PathVariable Long id,
-            @RequestParam Integer quantity) {
+            Authentication authentication) {
 
-        return ResponseEntity.ok(
-                productService.updateStockQuantity(id, quantity)
-        );
-    }
-    @GetMapping("/sku/{sku}")
-    public ResponseEntity<Product> getProductBySku(@PathVariable String sku) {
-        return ResponseEntity.ok(productService.getProductBySku(sku));
+        String email = authentication.getName();
+
+        try {
+
+            if (ADMIN_EMAIL.equalsIgnoreCase(email)) {
+
+                productService.deleteProductAsAdmin(id);
+
+            } else {
+
+                productService.deleteOwnProduct(
+                        id,
+                        email
+                );
+            }
+
+            return ResponseEntity.ok(
+                    Map.of(
+                            "message",
+                            "Product deleted successfully."
+                    )
+            );
+
+        } catch (RuntimeException ex) {
+
+            return ResponseEntity.badRequest()
+                    .body(
+                            Map.of(
+                                    "message",
+                                    ex.getMessage()
+                            )
+                    );
+        }
     }
 }
